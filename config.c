@@ -58,7 +58,7 @@ static void parse_alias(char *line) {
     strip_quotes(val);
 
     if (alias_count < MAX_ALIASES) {
-        // Добавлено принудительное нуль-терминирование для безопасности
+        
         strncpy(aliases[alias_count].name, name, sizeof(aliases[alias_count].name) - 1);
         aliases[alias_count].name[sizeof(aliases[alias_count].name) - 1] = '\0';
         
@@ -139,7 +139,7 @@ int is_function(const char *name) {
 }
 
 void expand_alias(char *buffer, size_t max_len) {
-    // Увеличено с 512 до 1024, чтобы вместить MAX_LINE
+    
     char temp[1024]; 
     strncpy(temp, buffer, sizeof(temp) - 1);
     temp[sizeof(temp) - 1] = '\0';
@@ -151,10 +151,10 @@ void expand_alias(char *buffer, size_t max_len) {
     if (val) {
         char *rest = buffer + strlen(first_word);
         
-        // Увеличено с 512 до 1024
+        
         char expanded[1024]; 
         
-        // Теперь размер буфера строго соответствует передаваемому ограничению
+        
         snprintf(expanded, sizeof(expanded), "%s%s", val, rest); 
         
         strncpy(buffer, expanded, max_len - 1);

@@ -311,7 +311,7 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
 
         unsigned char uc = (unsigned char)c;
 
-        if (uc == 3) { // Ctrl+C
+        if (uc == 3) { 
             write(1, "^C\r\n", 4);
             buffer[0] = '\0';
             len = 0;
@@ -321,8 +321,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 4) { // Ctrl+D (EOF)
-            // Игнорируем нажатие, если в буфере есть текст
+        if (uc == 4) { 
+            
             if (len == 0) {
                 disable_raw_mode(orig);
                 return -1;
@@ -330,8 +330,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 12) { // Ctrl+L (Очистка экрана)
-            write(1, "\033[H\033[J", 7); // Очищаем экран и сдвигаем курсор в левый верхний угол
+        if (uc == 12) { 
+            write(1, "\033[H\033[J", 7); 
             old_cursor_rows = 0;
             prompt_len = print_prompt();
             refresh_line(buffer, len, cursor, prompt_len);
@@ -349,19 +349,19 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 1) { // Ctrl+A
+        if (uc == 1) { 
             cursor = 0;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
         
-        if (uc == 5) { // Ctrl+E
+        if (uc == 5) { 
             cursor = len;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
 
-        if (uc == 8 || uc == 23) { // Backspace / Ctrl+W
+        if (uc == 8 || uc == 23) { 
             int target = find_prev_word_start(buffer, cursor);
             int bytes_del = cursor - target;
             if (bytes_del > 0) {
