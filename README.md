@@ -5,13 +5,15 @@ Minimalistic shell
 
 # Installation
 
-## 1. Cloning the repository
+## 1. Download the latest release and extract the source code
 
-```$ git clone https://github.com/Nick-cpp/nsh```
+```$ wget https://github.com/Nick-cpp/nsh/archive/refs/tags/1.0.tar.gz```
+
+```$ tar -xvf 1.0.tar.gz```
 
 ## 2. Building the nsh
 
-```$ cd nsh```
+```$ cd nsh-1.0```
 
 ```$ make```
 
