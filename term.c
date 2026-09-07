@@ -18,7 +18,7 @@ void enable_raw_mode(struct termios *orig) {
     tcgetattr(STDIN_FILENO, orig);
     raw = *orig;
     raw.c_lflag &= ~(ECHO | ICANON | ISIG);
-    raw.c_oflag |= (OPOST | ONLCR); // Включаем обработку вывода для корректного переноса строк
+    raw.c_oflag |= (OPOST | ONLCR);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
     write(1, "\033[?25h", 6);
 }
@@ -279,12 +279,12 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
 
             refresh_line(buffer, *len, *cursor, prompt_len);
         } else {
-            write(1, "\r\n", 2); // Используем \r\n
+            write(1, "\r\n", 2);
             for (int i = 0; i < match_count; i++) {
                 write(1, matches[i], strlen(matches[i]));
                 write(1, "  ", 2);
             }
-            write(1, "\r\n", 2); // Используем \r\n
+            write(1, "\r\n", 2);
             write(1, "\033[?25h", 6);
             
             old_cursor_rows = 0;
@@ -311,8 +311,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
 
         unsigned char uc = (unsigned char)c;
 
-        if (uc == 3) {
-            write(1, "^C\r\n", 4); // Исправлен перенос строки при Ctrl+C
+        if (uc == 3) { // Ctrl+C
+            write(1, "^C\r\n", 4);
             buffer[0] = '\0';
             len = 0;
             cursor = 0;
@@ -321,13 +321,25 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 4) {
-            disable_raw_mode(orig);
-            return -1;
+        if (uc == 4) { // Ctrl+D (EOF)
+            // Игнорируем нажатие, если в буфере есть текст
+            if (len == 0) {
+                disable_raw_mode(orig);
+                return -1;
+            }
+            continue;
+        }
+
+        if (uc == 12) { // Ctrl+L (Очистка экрана)
+            write(1, "\033[H\033[J", 7); // Очищаем экран и сдвигаем курсор в левый верхний угол
+            old_cursor_rows = 0;
+            prompt_len = print_prompt();
+            refresh_line(buffer, len, cursor, prompt_len);
+            continue;
         }
 
         if (uc == '\n' || uc == '\r') {
-            write(1, "\r\n", 2); // Исправлен перенос строки при вводе
+            write(1, "\r\n", 2);
             buffer[len] = '\0';
             break;
         }
@@ -337,19 +349,19 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 1) {
+        if (uc == 1) { // Ctrl+A
             cursor = 0;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
         
-        if (uc == 5) {
+        if (uc == 5) { // Ctrl+E
             cursor = len;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
 
-        if (uc == 8 || uc == 23) {
+        if (uc == 8 || uc == 23) { // Backspace / Ctrl+W
             int target = find_prev_word_start(buffer, cursor);
             int bytes_del = cursor - target;
             if (bytes_del > 0) {
