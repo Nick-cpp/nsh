@@ -10,6 +10,35 @@ int alias_count = 0;
 Function functions[MAX_FUNCTIONS];
 int function_count = 0;
 
+Completion completions[MAX_COMPLETIONS];
+int completion_count = 0;
+
+void add_completion(const char *cmd_name, const char *words) {
+    for (int i = 0; i < completion_count; i++) {
+        if (strcmp(completions[i].cmd_name, cmd_name) == 0) {
+            strncpy(completions[i].words, words, sizeof(completions[i].words) - 1);
+            completions[i].words[sizeof(completions[i].words) - 1] = '\0';
+            return;
+        }
+    }
+    if (completion_count < MAX_COMPLETIONS) {
+        strncpy(completions[completion_count].cmd_name, cmd_name, sizeof(completions[0].cmd_name) - 1);
+        completions[completion_count].cmd_name[sizeof(completions[0].cmd_name) - 1] = '\0';
+        strncpy(completions[completion_count].words, words, sizeof(completions[0].words) - 1);
+        completions[completion_count].words[sizeof(completions[0].words) - 1] = '\0';
+        completion_count++;
+    }
+}
+
+const char* get_completions(const char *cmd_name) {
+    for (int i = 0; i < completion_count; i++) {
+        if (strcmp(completions[i].cmd_name, cmd_name) == 0) {
+            return completions[i].words;
+        }
+    }
+    return NULL;
+}
+
 static char* trim_whitespace(char *str) {
     while (isspace((unsigned char)*str)) str++;
     if (*str == 0) return str;
@@ -24,6 +53,51 @@ static void strip_quotes(char *str) {
     if (len >= 2 && ((str[0] == '"' && str[len - 1] == '"') || (str[0] == '\'' && str[len - 1] == '\''))) {
         memmove(str, str + 1, len - 2);
         str[len - 2] = '\0';
+    }
+}
+
+static void parse_complete(const char *line) {
+    const char *p = line;
+    while (*p && !isspace((unsigned char)*p)) p++;
+    while (isspace((unsigned char)*p)) p++;
+
+    if (strncmp(p, "-c", 2) != 0 || (p[2] != ' ' && p[2] != '\t' && p[2] != '\0')) return;
+    p += 2;
+    while (isspace((unsigned char)*p)) p++;
+
+    char cmd_name[64];
+    int ci = 0;
+    while (*p && !isspace((unsigned char)*p) && ci < (int)sizeof(cmd_name) - 1)
+        cmd_name[ci++] = *p++;
+    cmd_name[ci] = '\0';
+    if (ci == 0) return;
+
+    while (isspace((unsigned char)*p)) p++;
+
+    const char *words = NULL;
+    while (*p) {
+        if (strncmp(p, "-W", 2) == 0 && (p[2] == ' ' || p[2] == '\t')) {
+            p += 3;
+            while (isspace((unsigned char)*p)) p++;
+            words = p;
+            break;
+        }
+        while (*p && !isspace((unsigned char)*p)) p++;
+        while (isspace((unsigned char)*p)) p++;
+    }
+
+    if (words) {
+        char wbuf[1024];
+        int wi = 0;
+        const char *wp = words;
+        while (*wp && *wp != '\n' && *wp != '\r' && wi < (int)sizeof(wbuf) - 1)
+            wbuf[wi++] = *wp++;
+        while (wi > 0 && (wbuf[wi-1] == ' ' || wbuf[wi-1] == '\t')) wi--;
+        wbuf[wi] = '\0';
+        strip_quotes(wbuf);
+        add_completion(cmd_name, wbuf);
+    } else {
+        add_completion(cmd_name, "");
     }
 }
 
@@ -58,7 +132,7 @@ static void parse_alias(char *line) {
     strip_quotes(val);
 
     if (alias_count < MAX_ALIASES) {
-        
+        // Добавлено принудительное нуль-терминирование для безопасности
         strncpy(aliases[alias_count].name, name, sizeof(aliases[alias_count].name) - 1);
         aliases[alias_count].name[sizeof(aliases[alias_count].name) - 1] = '\0';
         
@@ -111,6 +185,8 @@ void load_bash_config(const char *filepath) {
 
         if (strncmp(trimmed, "alias ", 6) == 0) {
             parse_alias(trimmed);
+        } else if (strncmp(trimmed, "complete ", 9) == 0) {
+            parse_complete(trimmed);
         } else if (strchr(trimmed, '(') || strncmp(trimmed, "function ", 9) == 0) {
             parse_function_header(trimmed);
         } else if (strncmp(trimmed, "export ", 7) == 0 || (strchr(trimmed, '=') && !strchr(trimmed, '('))) {
@@ -139,7 +215,7 @@ int is_function(const char *name) {
 }
 
 void expand_alias(char *buffer, size_t max_len) {
-    
+    // Увеличено с 512 до 1024, чтобы вместить MAX_LINE
     char temp[1024]; 
     strncpy(temp, buffer, sizeof(temp) - 1);
     temp[sizeof(temp) - 1] = '\0';
@@ -151,10 +227,10 @@ void expand_alias(char *buffer, size_t max_len) {
     if (val) {
         char *rest = buffer + strlen(first_word);
         
-        
+        // Увеличено с 512 до 1024
         char expanded[1024]; 
         
-        
+        // Теперь размер буфера строго соответствует передаваемому ограничению
         snprintf(expanded, sizeof(expanded), "%s%s", val, rest); 
         
         strncpy(buffer, expanded, max_len - 1);

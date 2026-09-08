@@ -4,7 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
-
+// Определение длины символа UTF-8 в байтах
 static int u8_char_len(unsigned char c) {
     if ((c & 0x80) == 0) return 1;
     if ((c & 0xE0) == 0xC0) return 2;
@@ -13,7 +13,7 @@ static int u8_char_len(unsigned char c) {
     return 1;
 }
 
-
+// Подсчет видимой длины UTF-8 строки (1 символ = 1 колонка)
 static int u8_visual_len(const char *str, size_t bytes) {
     int vis = 0;
     size_t i = 0;
@@ -49,15 +49,15 @@ static int print_cwd_formatted(void) {
     size_t bytes_to_print = strlen(to_print);
     write(1, to_print, bytes_to_print);
     
-    
+    // Возвращаем реальную видимую ширину, а не количество байт
     return (is_home ? 1 : 0) + u8_visual_len(to_print, bytes_to_print);
 }
 
 int print_prompt(void) {
     char *ps1 = getenv("PS1");
     int vis_len = 0;
-    int in_non_visible = 0; 
-    int in_esc = 0;         
+    int in_non_visible = 0; // Для маркеров \[ \]
+    int in_esc = 0;         // Для сырых ANSI кодов
     
     if (!ps1) {
         write(1, "# ", 2);
@@ -67,7 +67,7 @@ int print_prompt(void) {
 
     size_t len = strlen(ps1);
     for (size_t i = 0; i < len; ) {
-        
+        // Поддержка внутренних маркеров Bash для невидимых символов
         if (ps1[i] == '\001') { in_non_visible = 1; i++; continue; }
         if (ps1[i] == '\002') { in_non_visible = 0; i++; continue; }
 
@@ -85,14 +85,14 @@ int print_prompt(void) {
                 in_esc = 1;
                 i += 2; continue;
             }
-            
+            // Возвращаем парсинг \033 из оригинального кода[cite: 7]
             if (i + 3 < len && ps1[i+1] == '0' && ps1[i+2] == '3' && ps1[i+3] == '3') {
                 char esc = '\033';
                 write(1, &esc, 1);
                 in_esc = 1;
                 i += 4; continue;
             }
-            
+            // Обработка остальных экранирований
             char c = ps1[i+1];
             write(1, &c, 1);
             if (!in_non_visible && !in_esc) vis_len++;
@@ -103,7 +103,7 @@ int print_prompt(void) {
             i += 2; continue;
         }
         
-        
+        // Корректный пропуск сырых ANSI-кодов
         if (ps1[i] == '\033') {
             write(1, &ps1[i], 1);
             in_esc = 1;
@@ -111,7 +111,7 @@ int print_prompt(void) {
             continue;
         }
 
-        
+        // Печать и подсчет UTF-8 символов
         int char_bytes = u8_char_len((unsigned char)ps1[i]);
         for (int j = 0; j < char_bytes && i + j < len; j++) {
             write(1, &ps1[i+j], 1);

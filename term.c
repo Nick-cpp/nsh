@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -155,6 +156,7 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
 
     char matches[128][256];
     int match_count = 0;
+    int used_custom_completions = 0;
 
     if (!last_slash && word_start == 0) {
         for (int i = 0; i < alias_count && match_count < 128; i++) {
@@ -204,8 +206,34 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
                 free(path_copy);
             }
         }
+    } else if (!last_slash && word_start > 0) {
+        char first_word[512];
+        int fw_len = 0;
+        while (fw_len < word_start && buffer[fw_len] && !isspace((unsigned char)buffer[fw_len]))
+            first_word[fw_len++] = buffer[fw_len];
+        first_word[fw_len] = '\0';
+
+        const char *comp_words = get_completions(first_word);
+        if (comp_words && *comp_words) {
+            char words_copy[1024];
+            strncpy(words_copy, comp_words, sizeof(words_copy) - 1);
+            words_copy[sizeof(words_copy) - 1] = '\0';
+            char *w = strtok(words_copy, " ");
+            while (w && match_count < 128) {
+                if (strncmp(w, match_prefix, strlen(match_prefix)) == 0) {
+                    int exists = 0;
+                    for (int k = 0; k < match_count; k++) {
+                        if (strcmp(matches[k], w) == 0) { exists = 1; break; }
+                    }
+                    if (!exists) strncpy(matches[match_count++], w, 255);
+                }
+                w = strtok(NULL, " ");
+            }
+            if (match_count > 0) used_custom_completions = 1;
+        }
     }
 
+    if (!used_custom_completions) {
     DIR *d = opendir(dir_to_open);
     if (d) {
         struct dirent *ent;
@@ -236,6 +264,36 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
             }
         }
         closedir(d);
+    }
+
+    if (!last_slash && word_start > 0) {
+        char *path_env = getenv("PATH");
+        if (path_env) {
+            char *path_copy = strdup(path_env);
+            if (path_copy) {
+                char *pdir = strtok(path_copy, ":");
+                while (pdir && match_count < 128) {
+                    DIR *pd = opendir(pdir);
+                    if (pd) {
+                        struct dirent *ent;
+                        while ((ent = readdir(pd)) != NULL && match_count < 128) {
+                            if (strncmp(ent->d_name, match_prefix, strlen(match_prefix)) == 0) {
+                                if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+                                int exists = 0;
+                                for (int i = 0; i < match_count; i++) {
+                                    if (strcmp(matches[i], ent->d_name) == 0) { exists = 1; break; }
+                                }
+                                if (!exists) strncpy(matches[match_count++], ent->d_name, 255);
+                            }
+                        }
+                        closedir(pd);
+                    }
+                    pdir = strtok(NULL, ":");
+                }
+                free(path_copy);
+            }
+        }
+    }
     }
 
     if (match_count == 1) {
@@ -311,7 +369,7 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
 
         unsigned char uc = (unsigned char)c;
 
-        if (uc == 3) { 
+        if (uc == 3) { // Ctrl+C
             write(1, "^C\r\n", 4);
             buffer[0] = '\0';
             len = 0;
@@ -321,8 +379,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 4) { 
-            
+        if (uc == 4) { // Ctrl+D (EOF)
+            // Игнорируем нажатие, если в буфере есть текст
             if (len == 0) {
                 disable_raw_mode(orig);
                 return -1;
@@ -330,8 +388,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 12) { 
-            write(1, "\033[H\033[J", 7); 
+        if (uc == 12) { // Ctrl+L (Очистка экрана)
+            write(1, "\033[H\033[J", 7); // Очищаем экран и сдвигаем курсор в левый верхний угол
             old_cursor_rows = 0;
             prompt_len = print_prompt();
             refresh_line(buffer, len, cursor, prompt_len);
@@ -349,19 +407,19 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
             continue;
         }
 
-        if (uc == 1) { 
+        if (uc == 1) { // Ctrl+A
             cursor = 0;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
         
-        if (uc == 5) { 
+        if (uc == 5) { // Ctrl+E
             cursor = len;
             refresh_line(buffer, len, cursor, prompt_len);
             continue;
         }
 
-        if (uc == 8 || uc == 23) { 
+        if (uc == 8 || uc == 23) { // Backspace / Ctrl+W
             int target = find_prev_word_start(buffer, cursor);
             int bytes_del = cursor - target;
             if (bytes_del > 0) {
