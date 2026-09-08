@@ -322,9 +322,13 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
     }
 }
 
+static int reverse_search(char *buffer, int prompt_len);
+static void load_history_from_file(void);
+
 int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
     int len = 0;
     int cursor = 0;
+    load_history_from_file();
     int history_index = history_count;
     buffer[0] = '\0';
 
@@ -375,6 +379,19 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
 
         if (uc == '\t' || uc == 9) {
             do_tab_completion(buffer, &len, &cursor, prompt_len);
+            continue;
+        }
+
+        if (uc == 18) { // Ctrl+R — reverse search
+            int rlen = reverse_search(buffer, prompt_len);
+            if (rlen >= 0) {
+                len = rlen;
+                cursor = len;
+            }
+            write(1, "\033[2K\033[A\033[2K\r", 12);
+            prompt_len = print_prompt();
+            write(1, buffer, len);
+            cursor = len;
             continue;
         }
 
@@ -530,4 +547,150 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
 
     disable_raw_mode(orig);
     return len;
+}
+
+static char history_path[512];
+static int history_loaded = 0;
+
+static void init_history_path(void) {
+    char *home = getenv("HOME");
+    if (home) {
+        snprintf(history_path, sizeof(history_path), "%s/.nsh_history", home);
+    }
+}
+
+static void load_history_from_file(void) {
+    if (history_loaded) return;
+    history_loaded = 1;
+    init_history_path();
+    if (history_path[0] == '\0') return;
+    FILE *f = fopen(history_path, "r");
+    if (!f) return;
+    char line[MAX_LINE];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = '\0';
+        if (line[0] == '\0') continue;
+        if (history_count < MAX_HISTORY) {
+            strncpy(history[history_count++], line, MAX_LINE - 1);
+        } else {
+            for (int i = 1; i < MAX_HISTORY; i++)
+                strcpy(history[i - 1], history[i]);
+            strncpy(history[MAX_HISTORY - 1], line, MAX_LINE - 1);
+        }
+    }
+    fclose(f);
+}
+
+void save_history(void) {
+    init_history_path();
+    if (history_path[0] == '\0') return;
+
+    FILE *f = fopen(history_path, "a");
+    if (!f) return;
+    fprintf(f, "%s\n", history[history_count - 1]);
+    fclose(f);
+
+    int total = 0;
+    f = fopen(history_path, "r");
+    if (!f) return;
+    char line[MAX_LINE];
+    while (fgets(line, sizeof(line), f)) total++;
+    fclose(f);
+
+    if (total <= MAX_HISTORY) return;
+
+    int skip = total - MAX_HISTORY;
+    f = fopen(history_path, "r");
+    if (!f) return;
+    for (int i = 0; i < skip; i++) fgets(line, sizeof(line), f);
+
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", history_path);
+    FILE *tmp = fopen(tmp_path, "w");
+    if (!tmp) { fclose(f); return; }
+    while (fgets(line, sizeof(line), f)) fputs(line, tmp);
+    fclose(tmp);
+    fclose(f);
+
+    rename(tmp_path, history_path);
+}
+
+static int reverse_search(char *buffer, int prompt_len) {
+    init_history_path();
+    char search_buf[MAX_LINE] = {0};
+    int search_pos = 0;
+    char found_line[MAX_LINE] = {0};
+    int found = 0;
+    int orig_len = strlen(buffer);
+    char orig_buf[MAX_LINE];
+    strcpy(orig_buf, buffer);
+
+    write(1, "\r\n(reverse-i-search)`': ", 23);
+
+    while (1) {
+        char c;
+        if (read(STDIN_FILENO, &c, 1) <= 0) {
+            strcpy(buffer, orig_buf);
+            return orig_len;
+        }
+
+        unsigned char uc = (unsigned char)c;
+
+        if (uc == '\n' || uc == '\r') {
+            if (found) {
+                strcpy(buffer, found_line);
+                return strlen(buffer);
+            }
+            strcpy(buffer, orig_buf);
+            return orig_len;
+        }
+
+        if (uc == 3) {
+            strcpy(buffer, orig_buf);
+            return orig_len;
+        }
+
+        if (uc == 8 || uc == 127) {
+            if (search_pos > 0) {
+                search_pos--;
+                search_buf[search_pos] = '\0';
+            }
+        } else if (uc == 27) {
+            break;
+        } else {
+            if (search_pos < MAX_LINE - 2) {
+                search_buf[search_pos++] = uc;
+                search_buf[search_pos] = '\0';
+            }
+        }
+
+        found = 0;
+        found_line[0] = '\0';
+        if (search_pos > 0 && history_path[0]) {
+            FILE *f = fopen(history_path, "r");
+            if (f) {
+                char line[MAX_LINE];
+                while (fgets(line, sizeof(line), f)) {
+                    line[strcspn(line, "\n")] = '\0';
+                    if (strstr(line, search_buf)) {
+                        strcpy(found_line, line);
+                        found = 1;
+                    }
+                }
+                fclose(f);
+            }
+        }
+
+        char prompt_line[256];
+        int prompt_len2 = snprintf(prompt_line, sizeof(prompt_line),
+            "\033[2K\r(reverse-i-search)`%s': ", search_buf);
+        write(1, "\033[2K\r", 5);
+        write(1, prompt_line, prompt_len2);
+        if (found) {
+            write(1, found_line, strlen(found_line));
+        }
+    }
+
+    strcpy(buffer, orig_buf);
+    return orig_len;
 }

@@ -1299,6 +1299,8 @@ int main(int argc, char *argv[]) {
                 strncpy(history[MAX_HISTORY - 1], buffer, MAX_LINE - 1);
             }
 
+            save_history();
+
             parse_and_execute(buffer);
         }
     }
