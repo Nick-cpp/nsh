@@ -220,7 +220,7 @@ void expand_alias(char *buffer, size_t max_len) {
     strncpy(temp, buffer, sizeof(temp) - 1);
     temp[sizeof(temp) - 1] = '\0';
 
-    char *first_word = strtok(temp, " \t\n");
+    char *first_word = strtok(temp, " \t\n;");
     if (!first_word) return;
 
     const char *val = get_alias(first_word);

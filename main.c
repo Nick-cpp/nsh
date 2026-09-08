@@ -1191,7 +1191,6 @@ static int skip_compound(char *line, int start) {
 
 static void parse_and_execute(char *cmdline) {
     if (!cmdline || !*cmdline) return;
-    expand_alias(cmdline, MAX_LINE);
 
     char segments[64][ARG_SIZE];
     int seg_count = 0;
@@ -1250,6 +1249,7 @@ static void parse_and_execute(char *cmdline) {
     if (seg_count == 0) return;
 
     for (int i = 0; i < seg_count; i++) {
+        expand_alias(segments[i], ARG_SIZE);
         expand_cmd_subst(segments[i], ARG_SIZE);
         execute_segment(segments[i]);
         if (loop_break_flag || loop_continue_flag) break;
