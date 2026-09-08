@@ -265,35 +265,6 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
         }
         closedir(d);
     }
-
-    if (!last_slash && word_start > 0) {
-        char *path_env = getenv("PATH");
-        if (path_env) {
-            char *path_copy = strdup(path_env);
-            if (path_copy) {
-                char *pdir = strtok(path_copy, ":");
-                while (pdir && match_count < 128) {
-                    DIR *pd = opendir(pdir);
-                    if (pd) {
-                        struct dirent *ent;
-                        while ((ent = readdir(pd)) != NULL && match_count < 128) {
-                            if (strncmp(ent->d_name, match_prefix, strlen(match_prefix)) == 0) {
-                                if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-                                int exists = 0;
-                                for (int i = 0; i < match_count; i++) {
-                                    if (strcmp(matches[i], ent->d_name) == 0) { exists = 1; break; }
-                                }
-                                if (!exists) strncpy(matches[match_count++], ent->d_name, 255);
-                            }
-                        }
-                        closedir(pd);
-                    }
-                    pdir = strtok(NULL, ":");
-                }
-                free(path_copy);
-            }
-        }
-    }
     }
 
     if (match_count == 1) {

@@ -1257,6 +1257,8 @@ static void parse_and_execute(char *cmdline) {
 }
 
 int main(int argc, char *argv[]) {
+    setenv("SHELL", "/bin/bash", 1);
+
     if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
         char cmd[ARG_SIZE];
         strncpy(cmd, argv[2], ARG_SIZE - 1);
