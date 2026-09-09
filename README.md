@@ -24,3 +24,7 @@ Minimalistic shell
 ```# echo /usr/local/bin/nsh >> /etc/shells```
 
 ```$ chsh -s /usr/local/bin/nsh```
+
+## 4. Configuring
+
+Use the '``~/.nshrc`` to configure the nsh, if you used bash before you may just copy the ``~/.bashrc`` to ``~/.nshrc``
