@@ -27,4 +27,4 @@ Minimalistic shell
 
 ## 4. Configuring
 
-Use the '``~/.nshrc`` to configure the nsh, if you used bash before you may just copy the ``~/.bashrc`` to ``~/.nshrc``
+Use the ``~/.nshrc`` to configure the nsh, if you used bash before you may just copy the ``~/.bashrc`` to ``~/.nshrc``
