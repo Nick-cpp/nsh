@@ -7,13 +7,13 @@ Minimalistic shell
 
 ## 1. Download the latest release and extract the source code
 
-```$ wget https://github.com/Nick-cpp/nsh/archive/refs/tags/1.3.tar.gz```
+```$ wget https://github.com/Nick-cpp/nsh/archive/refs/tags/1.4.tar.gz```
 
-```$ tar -xvf 1.3.tar.gz```
+```$ tar -xvf 1.4.tar.gz```
 
 ## 2. Building the nsh
 
-```$ cd nsh-1.3```
+```$ cd nsh-1.4```
 
 ```$ make```
 
