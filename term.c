@@ -329,7 +329,8 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
     int len = 0;
     int cursor = 0;
     load_history_from_file();
-    int history_index = history_count;
+    static int hist_pos = 0;
+    hist_pos = history_count;
     buffer[0] = '\0';
 
     enable_raw_mode(orig);
@@ -470,19 +471,19 @@ int read_line_custom(char *buffer, struct termios *orig, int prompt_len) {
                     }
                 }
                 else if (last_char == 'A') {
-                    if (history_index > 0) {
-                        history_index--;
-                        strcpy(buffer, history[history_index]);
+                    if (hist_pos > 0) {
+                        hist_pos--;
+                        strcpy(buffer, history[hist_pos]);
                         len = strlen(buffer);
                         cursor = len;
                         refresh_line(buffer, len, cursor, prompt_len);
                     }
                 }
                 else if (last_char == 'B') {
-                    if (history_index < history_count) {
-                        history_index++;
-                        if (history_index < history_count) {
-                            strcpy(buffer, history[history_index]);
+                    if (hist_pos < history_count) {
+                        hist_pos++;
+                        if (hist_pos < history_count) {
+                            strcpy(buffer, history[hist_pos]);
                         } else {
                             buffer[0] = '\0';
                         }

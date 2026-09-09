@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <glob.h>
 
@@ -19,6 +20,8 @@
 #define ARG_SIZE 1024
 
 static int last_exit_status = 0;
+static int redir_in_fd = -1;
+static int redir_out_fd = -1;
 static int loop_break_flag = 0;
 static int loop_continue_flag = 0;
 
@@ -950,6 +953,8 @@ static int exec_simple(char **args, int argc) {
     pid_t pid = fork();
     if (pid == 0) {
         signal(SIGINT, SIG_DFL);
+        if (redir_in_fd >= 0) { dup2(redir_in_fd, STDIN_FILENO); close(redir_in_fd); }
+        if (redir_out_fd >= 0) { dup2(redir_out_fd, STDOUT_FILENO); close(redir_out_fd); }
         execvp(args[0], args);
         if (errno == ENOENT) {
             fprintf(stderr, "nsh: %s: command not found\n", args[0]);
@@ -979,7 +984,6 @@ static int exec_simple(char **args, int argc) {
 static void execute_segment(char *cmd) {
     while (*cmd == ' ' || *cmd == '\t') cmd++;
     if (!*cmd) return;
-
 
     if (strncmp(cmd, "if ", 3) == 0 || strncmp(cmd, "if\t", 3) == 0 || strncmp(cmd, "if\n", 3) == 0 || strcmp(cmd, "if") == 0) {
         handle_if(cmd[2] ? cmd + 3 : cmd + 2);
@@ -1037,6 +1041,58 @@ static void execute_segment(char *cmd) {
     if (strstr(cmd, " | ")) {
         execute_pipe(cmd);
         return;
+    }
+
+    int redir_out_fd = -1, redir_in_fd = -1;
+    int redir_out_append = 0;
+    char redir_out_file[512] = {0}, redir_in_file[512] = {0};
+
+    {
+        char clean[ARG_SIZE];
+        int c_idx = 0;
+        char *p = cmd;
+        int in_sq = 0, in_dq = 0;
+
+        while (*p) {
+            if (*p == '\\' && !in_sq) { clean[c_idx++] = *p++; if (*p) clean[c_idx++] = *p++; continue; }
+            if (*p == '\'' && !in_dq) { in_sq = !in_sq; clean[c_idx++] = *p++; continue; }
+            if (*p == '"' && !in_sq) { in_dq = !in_dq; clean[c_idx++] = *p++; continue; }
+            if (!in_sq && !in_dq && *p == '>' && p[1] == '>') {
+                p += 2;
+                while (*p == ' ' || *p == '\t') p++;
+                int f_idx = 0;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != ';' && *p != '|') {
+                    redir_out_file[f_idx++] = *p++;
+                }
+                redir_out_file[f_idx] = '\0';
+                redir_out_append = 1;
+                continue;
+            }
+            if (!in_sq && !in_dq && *p == '>') {
+                p++;
+                while (*p == ' ' || *p == '\t') p++;
+                int f_idx = 0;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != ';' && *p != '|') {
+                    redir_out_file[f_idx++] = *p++;
+                }
+                redir_out_file[f_idx] = '\0';
+                redir_out_append = 0;
+                continue;
+            }
+            if (!in_sq && !in_dq && *p == '<') {
+                p++;
+                while (*p == ' ' || *p == '\t') p++;
+                int f_idx = 0;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != ';' && *p != '|') {
+                    redir_in_file[f_idx++] = *p++;
+                }
+                redir_in_file[f_idx] = '\0';
+                continue;
+            }
+            clean[c_idx++] = *p++;
+        }
+        clean[c_idx] = '\0';
+        strcpy(cmd, clean);
     }
 
     char *env_save[MAX_ARGS][2];
@@ -1127,7 +1183,43 @@ static void execute_segment(char *cmd) {
     }
 
     if (argc > 0) {
+        redir_in_fd = -1;
+        redir_out_fd = -1;
+        if (redir_in_file[0]) {
+            redir_in_fd = open(redir_in_file, O_RDONLY);
+            if (redir_in_fd < 0) {
+                fprintf(stderr, "nsh: %s: %s\n", redir_in_file, strerror(errno));
+                last_exit_status = 1;
+                for (int i = 0; i < env_count; i++) {
+                    if (env_save[i][1]) { setenv(env_save[i][0], env_save[i][1], 1); free(env_save[i][1]); }
+                    else unsetenv(env_save[i][0]);
+                    free(env_save[i][0]);
+                }
+                free_args(args);
+                return;
+            }
+        }
+        if (redir_out_file[0]) {
+            int flags = O_WRONLY | O_CREAT | (redir_out_append ? O_APPEND : O_TRUNC);
+            redir_out_fd = open(redir_out_file, flags, 0644);
+            if (redir_out_fd < 0) {
+                fprintf(stderr, "nsh: %s: %s\n", redir_out_file, strerror(errno));
+                last_exit_status = 1;
+                if (redir_in_fd >= 0) close(redir_in_fd);
+                for (int i = 0; i < env_count; i++) {
+                    if (env_save[i][1]) { setenv(env_save[i][0], env_save[i][1], 1); free(env_save[i][1]); }
+                    else unsetenv(env_save[i][0]);
+                    free(env_save[i][0]);
+                }
+                free_args(args);
+                return;
+            }
+        }
         exec_simple(args, argc);
+        if (redir_in_fd >= 0) close(redir_in_fd);
+        if (redir_out_fd >= 0) close(redir_out_fd);
+        redir_in_fd = -1;
+        redir_out_fd = -1;
     }
 
     for (int i = 0; i < env_count; i++) {
@@ -1258,6 +1350,11 @@ static void parse_and_execute(char *cmdline) {
 
 int main(int argc, char *argv[]) {
     setenv("SHELL", "/bin/bash", 1);
+
+    if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
+        printf("Nsh version 1.4\n");
+        return 0;
+    }
 
     if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
         char cmd[ARG_SIZE];
