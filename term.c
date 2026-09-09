@@ -20,12 +20,12 @@ void enable_raw_mode(struct termios *orig) {
     raw = *orig;
     raw.c_lflag &= ~(ECHO | ICANON | ISIG);
     raw.c_oflag |= (OPOST | ONLCR);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    tcsetattr(STDIN_FILENO, TCSADRAIN, &raw);
     write(1, "\033[?25h", 6);
 }
 
 void disable_raw_mode(struct termios *orig) {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, orig);
+    tcsetattr(STDIN_FILENO, TCSADRAIN, orig);
 }
 
 static int prev_u8_char(const char *buf, int cursor) {
