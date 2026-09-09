@@ -959,8 +959,6 @@ static int exec_simple(char **args, int argc) {
         if (errno == ENOENT) {
             fprintf(stderr, "nsh: %s: command not found\n", args[0]);
             exit(127);
-            fprintf(stderr, "nsh: %s: command not found\n", args[0]);
-            exit(127);
         } else if (errno == EACCES) {
             struct stat st;
             if (stat(args[0], &st) == 0 && S_ISDIR(st.st_mode))
@@ -1349,10 +1347,15 @@ static void parse_and_execute(char *cmdline) {
 }
 
 int main(int argc, char *argv[]) {
-    setenv("SHELL", "/bin/bash", 1);
+    char self_path[512];
+    ssize_t len = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (len > 0) {
+        self_path[len] = '\0';
+        setenv("SHELL", self_path, 1);
+    }
 
     if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
-        printf("Nsh version 1.4\n");
+        printf("Nsh version 1.5\n");
         return 0;
     }
 
