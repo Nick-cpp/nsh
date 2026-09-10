@@ -287,6 +287,7 @@ static int tokenize(char *cmdline, char *args[]) {
         int b_idx = 0;
         int in_squote = 0;
         int in_dquote = 0;
+        int tilde_quoted = 0;
 
         while (*p) {
             if (*p == '\\' && !in_squote) {
@@ -296,11 +297,13 @@ static int tokenize(char *cmdline, char *args[]) {
             }
             if (*p == '\'' && !in_dquote) {
                 in_squote = !in_squote;
+                if (b_idx == 0) tilde_quoted = 1;
                 p++;
                 continue;
             }
             if (*p == '"' && !in_squote) {
                 in_dquote = !in_dquote;
+                if (b_idx == 0) tilde_quoted = 1;
                 p++;
                 continue;
             }
@@ -330,6 +333,16 @@ static int tokenize(char *cmdline, char *args[]) {
         buf[b_idx] = '\0';
 
         if (b_idx == 0) continue;
+
+        if (buf[0] == '~' && !tilde_quoted) {
+            const char *home = getenv("HOME");
+            if (home) {
+                char expanded_tilde[ARG_SIZE];
+                snprintf(expanded_tilde, sizeof(expanded_tilde), "%s%s", home, buf + 1);
+                strncpy(buf, expanded_tilde, ARG_SIZE - 1);
+                buf[ARG_SIZE - 1] = '\0';
+            }
+        }
 
         char expanded[MAX_ARGS][ARG_SIZE];
         int exp_count = 0;
@@ -1355,7 +1368,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
-        printf("Nsh version 1.6\n");
+        printf("Nsh version 1.7\n");
         return 0;
     }
 

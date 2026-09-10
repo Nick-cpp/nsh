@@ -56,13 +56,22 @@ static int u8_visual_width(const char *str, int bytes) {
     return width;
 }
 
+static int is_word_break(char c) {
+    return c == ' ' || c == '\t' || c == '/' || c == '.' || c == '-'
+        || c == '_' || c == '=' || c == ',' || c == ';' || c == '|'
+        || c == '&' || c == '>' || c == '<' || c == '(' || c == ')'
+        || c == '[' || c == ']' || c == '{' || c == '}' || c == '"'
+        || c == '\'' || c == '`' || c == '$' || c == '!' || c == '#'
+        || c == '~' || c == '+';
+}
+
 static int find_prev_word_start(const char *buf, int cursor) {
     if (cursor <= 0) return 0;
     int i = prev_u8_char(buf, cursor);
-    while (i > 0 && (buf[i] == ' ' || buf[i] == '\t')) i = prev_u8_char(buf, i);
+    while (i > 0 && is_word_break(buf[i])) i = prev_u8_char(buf, i);
     while (i > 0) {
         int p = prev_u8_char(buf, i);
-        if (buf[p] == ' ' || buf[p] == '\t') break;
+        if (is_word_break(buf[p])) break;
         i = p;
     }
     return i;
@@ -71,16 +80,16 @@ static int find_prev_word_start(const char *buf, int cursor) {
 static int find_next_word_end(const char *buf, int len, int cursor) {
     if (cursor >= len) return len;
     int i = cursor;
-    while (i < len && buf[i] != ' ' && buf[i] != '\t') i = next_u8_char(buf, i, len);
-    while (i < len && (buf[i] == ' ' || buf[i] == '\t')) i = next_u8_char(buf, i, len);
+    while (i < len && !is_word_break(buf[i])) i = next_u8_char(buf, i, len);
+    while (i < len && is_word_break(buf[i])) i = next_u8_char(buf, i, len);
     return i;
 }
 
 static int find_next_word_start(const char *buf, int len, int cursor) {
     if (cursor >= len) return len;
     int i = cursor;
-    while (i < len && buf[i] != ' ' && buf[i] != '\t') i = next_u8_char(buf, i, len);
-    while (i < len && (buf[i] == ' ' || buf[i] == '\t')) i = next_u8_char(buf, i, len);
+    while (i < len && !is_word_break(buf[i])) i = next_u8_char(buf, i, len);
+    while (i < len && is_word_break(buf[i])) i = next_u8_char(buf, i, len);
     return i;
 }
 
@@ -132,14 +141,20 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
     strncpy(word, buffer + word_start, old_word_len);
     word[old_word_len] = '\0';
 
+    int path_start = 0;
+    char *eq = strchr(word, '=');
+    if (eq) {
+        path_start = (int)(eq - word + 1);
+    }
+
     char dir_to_open[512] = ".";
     char match_prefix[256] = "";
-    char *last_slash = strrchr(word, '/');
+    char *last_slash = strrchr(word + path_start, '/');
 
     if (last_slash) {
-        int dir_len = last_slash - word + 1;
-        strncpy(dir_to_open, word, dir_len);
-        dir_to_open[dir_len] = '\0';
+        int dir_len = (last_slash - word) + 1;
+        strncpy(dir_to_open, word + path_start, dir_len - path_start);
+        dir_to_open[dir_len - path_start] = '\0';
         strcpy(match_prefix, last_slash + 1);
 
         if (dir_to_open[0] == '~') {
@@ -151,7 +166,7 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
             }
         }
     } else {
-        strcpy(match_prefix, word);
+        strcpy(match_prefix, word + path_start);
     }
 
     char matches[128][256];
@@ -245,7 +260,7 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
                 if (last_slash) {
                     snprintf(full_name, sizeof(full_name), "%.*s%s", (int)(last_slash - word + 1), word, ent->d_name);
                 } else {
-                    strcpy(full_name, ent->d_name);
+                    snprintf(full_name, sizeof(full_name), "%.*s%s", path_start, word, ent->d_name);
                 }
 
                 int exists = 0;
