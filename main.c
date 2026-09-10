@@ -1368,7 +1368,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
-        printf("Nsh version 1.7\n");
+        printf("Nsh version 1.8\n");
         return 0;
     }
 
