@@ -130,6 +130,19 @@ static void refresh_line(const char *buffer, int len, int cursor, int prompt_len
     }
 }
 
+static int escape_copy(char *dst, const char *src, int dst_size) {
+    int j = 0;
+    for (int i = 0; src[i] && j < dst_size - 2; i++) {
+        if (src[i] == ' ' || src[i] == '\t' || src[i] == '\\' || src[i] == '"'
+            || src[i] == '\'' || src[i] == '$' || src[i] == '`') {
+            dst[j++] = '\\';
+        }
+        dst[j++] = src[i];
+    }
+    dst[j] = '\0';
+    return j;
+}
+
 static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_len) {
     int word_start = *cursor;
     while (word_start > 0 && buffer[word_start - 1] != ' ') {
@@ -283,11 +296,11 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
     }
 
     if (match_count == 1) {
-        char *completion = matches[0];
-        int comp_len = strlen(completion);
+        char escaped[1024];
+        int comp_len = escape_copy(escaped, matches[0], sizeof(escaped));
 
         memmove(&buffer[word_start + comp_len], &buffer[*cursor], *len - *cursor + 1);
-        memcpy(&buffer[word_start], completion, comp_len);
+        memcpy(&buffer[word_start], escaped, comp_len);
 
         *len = *len - old_word_len + comp_len;
         *cursor = word_start + comp_len;
@@ -313,10 +326,11 @@ static void do_tab_completion(char *buffer, int *len, int *cursor, int prompt_le
         }
 
         if (strlen(common_prefix) > strlen(word)) {
-            int comp_len = strlen(common_prefix);
+            char escaped[1024];
+            int comp_len = escape_copy(escaped, common_prefix, sizeof(escaped));
 
             memmove(&buffer[word_start + comp_len], &buffer[*cursor], *len - *cursor + 1);
-            memcpy(&buffer[word_start], common_prefix, comp_len);
+            memcpy(&buffer[word_start], escaped, comp_len);
 
             *len = *len - old_word_len + comp_len;
             *cursor = word_start + comp_len;
