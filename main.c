@@ -1400,8 +1400,27 @@ static void parse_and_execute(char *cmdline) {
         { char *le = cp; while (*le && *le != '\n' && *le != ';') le++; line_end = le; }
         int line_len = (int)(line_end - cp);
 
-        if (strncmp(cp, "function ", 9) == 0 ||
-            (memchr(cp, '(', line_len) && memchr(cp, ')', line_len) && memmem(cp, line_len, "{", 1))) {
+        int is_func_def = (strncmp(cp, "function ", 9) == 0);
+        if (!is_func_def) {
+            char *open_p = memchr(cp, '(', line_len);
+            if (open_p && open_p > cp) {
+                char *close_p = NULL;
+                int between = 0;
+                for (char *tp = open_p + 1; tp < cp + line_len; tp++) {
+                    if (*tp == ')') { close_p = tp; break; }
+                    if (*tp != ' ' && *tp != '\t') break;
+                    between++;
+                }
+                if (close_p && between <= 2) {
+                    char *prev = open_p - 1;
+                    while (prev > cp && (*prev == ' ' || *prev == '\t')) prev--;
+                    if (prev >= cp && (isalnum((unsigned char)*prev) || *prev == '_')) {
+                        is_func_def = 1;
+                    }
+                }
+            }
+        }
+        if (is_func_def) {
             char *brace = memchr(cp, '{', line_len);
             if (brace) {
                 int depth = 1;
@@ -1533,7 +1552,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
-        printf("Nsh version 2.0\n");
+        printf("Nsh version 2.1\n");
         return 0;
     }
 
