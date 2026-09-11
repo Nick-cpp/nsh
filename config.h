@@ -14,6 +14,7 @@ typedef struct {
 
 typedef struct {
     char name[64];
+    char body[4096];
 } Function;
 
 typedef struct {
@@ -33,6 +34,7 @@ extern int completion_count;
 void load_bash_config(const char *filepath);
 const char* get_alias(const char *name);
 int is_function(const char *name);
+const char* get_function_body(const char *name);
 void expand_alias(char *buffer, size_t max_len);
 void add_completion(const char *cmd_name, const char *words);
 const char* get_completions(const char *cmd_name);

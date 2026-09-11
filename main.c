@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,8 @@ static char *run_command_capture(const char *cmd) {
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
@@ -201,14 +204,73 @@ static void expand_variable(const char *arg, char *out, size_t out_size) {
                 i++;
                 char varname[256];
                 int v_idx = 0;
-                while (arg[i] && arg[i] != '}' && v_idx < (int)sizeof(varname) - 1)
+                while (arg[i] && arg[i] != '}' && arg[i] != ':' && v_idx < (int)sizeof(varname) - 1)
                     varname[v_idx++] = arg[i++];
                 varname[v_idx] = '\0';
-                if (arg[i] == '}') i++;
-                const char *val = getenv(varname);
-                if (val) {
-                    for (int k = 0; val[k] && o_idx < (int)out_size - 1; k++)
-                        out[o_idx++] = val[k];
+
+                if (arg[i] == ':') {
+                    i++;
+                    char op = arg[i];
+                    if (op == '-' || op == '=' || op == '+' || op == '?') {
+                        i++;
+                        char default_val[512];
+                        int d_idx = 0;
+                        int d_depth = 0;
+                        while (arg[i] && (arg[i] != '}' || d_depth > 0)) {
+                            if (arg[i] == '{') d_depth++;
+                            else if (arg[i] == '}') d_depth--;
+                            if (d_depth >= 0 && d_idx < (int)sizeof(default_val) - 1)
+                                default_val[d_idx++] = arg[i];
+                            i++;
+                        }
+                        default_val[d_idx] = '\0';
+
+                        if (arg[i] == '}') i++;
+
+                        const char *val = getenv(varname);
+                        int val_set = (val != NULL);
+                        int val_nonempty = (val && val[0] != '\0');
+
+                        const char *result = NULL;
+                        if (op == '-') {
+                            result = (val_set && val_nonempty) ? val : default_val;
+                        } else if (op == '=') {
+                            if (!val_set || !val_nonempty) {
+                                setenv(varname, default_val, 1);
+                                result = getenv(varname);
+                            } else {
+                                result = val;
+                            }
+                        } else if (op == '+') {
+                            result = (val_set && val_nonempty) ? default_val : NULL;
+                        } else if (op == '?') {
+                            if (!val_set || !val_nonempty) {
+                                fprintf(stderr, "nsh: %s: %s\n", varname, default_val);
+                            }
+                            result = val;
+                        }
+
+                        if (result) {
+                            for (int k = 0; result[k] && o_idx < (int)out_size - 1; k++)
+                                out[o_idx++] = result[k];
+                        }
+                    } else {
+                        /* Handle ${VAR:offset} or ${VAR:offset:length} - skip for now */
+                        while (arg[i] && arg[i] != '}') i++;
+                        if (arg[i] == '}') i++;
+                        const char *val = getenv(varname);
+                        if (val) {
+                            for (int k = 0; val[k] && o_idx < (int)out_size - 1; k++)
+                                out[o_idx++] = val[k];
+                        }
+                    }
+                } else if (arg[i] == '}') {
+                    i++;
+                    const char *val = getenv(varname);
+                    if (val) {
+                        for (int k = 0; val[k] && o_idx < (int)out_size - 1; k++)
+                            out[o_idx++] = val[k];
+                    }
                 }
             } else if (isalpha((unsigned char)arg[i]) || arg[i] == '_') {
                 char varname[256];
@@ -349,7 +411,6 @@ static int tokenize(char *cmdline, char *args[]) {
         expand_token(buf, expanded, &exp_count);
 
         for (int e = 0; e < exp_count && count < MAX_ARGS - 1; e++) {
-            if (strlen(expanded[e]) == 0) continue;
             args[count] = malloc(strlen(expanded[e]) + 1);
             strcpy(args[count], expanded[e]);
             count++;
@@ -675,11 +736,21 @@ static int handle_case(char *body) {
     char *p = body;
     while (*p == ' ' || *p == '\t') p++;
 
-    char word[256];
+    char word_raw[256];
     int wi = 0;
-    while (*p && !isspace((unsigned char)*p) && wi < (int)sizeof(word) - 1)
-        word[wi++] = *p++;
-    word[wi] = '\0';
+    while (*p && !isspace((unsigned char)*p) && wi < (int)sizeof(word_raw) - 1)
+        word_raw[wi++] = *p++;
+    word_raw[wi] = '\0';
+
+    char word[256];
+    expand_variable(word_raw, word, sizeof(word));
+
+    if ((word[0] == '"' && word[strlen(word)-1] == '"') ||
+        (word[0] == '\'' && word[strlen(word)-1] == '\'')) {
+        int len = strlen(word);
+        memmove(word, word + 1, len - 2);
+        word[len - 2] = '\0';
+    }
 
     while (*p == ' ' || *p == '\t') p++;
 
@@ -900,14 +971,18 @@ static int exec_simple(char **args, int argc) {
         if (argc < 2) { fprintf(stderr, "nsh: %s: filename required\n", args[0]); return 1; }
         FILE *f = fopen(args[1], "r");
         if (!f) { fprintf(stderr, "nsh: %s: %s: %s\n", args[0], args[1], strerror(errno)); return 1; }
-        char line[ARG_SIZE];
-        while (fgets(line, sizeof(line), f)) {
-            size_t l = strlen(line);
-            while (l > 0 && (line[l-1] == '\n' || line[l-1] == '\r')) line[--l] = '\0';
-            if (strlen(line) > 0) parse_and_execute(line);
-        }
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (fsize <= 0) { fclose(f); return 0; }
+        char *content = malloc(fsize + 1);
+        if (!content) { fclose(f); return 1; }
+        fread(content, 1, fsize, f);
+        content[fsize] = '\0';
         fclose(f);
-        return 0;
+        parse_and_execute(content);
+        free(content);
+        return last_exit_status;
     }
 
     if (strcmp(args[0], "test") == 0 || strcmp(args[0], "[") == 0) {
@@ -932,31 +1007,40 @@ static int exec_simple(char **args, int argc) {
 
     if (strcmp(args[0], "break") == 0) { loop_break_flag = 1; return 0; }
     if (strcmp(args[0], "continue") == 0) { loop_continue_flag = 1; return 0; }
+    if (strcmp(args[0], "true") == 0) { return 0; }
+    if (strcmp(args[0], "false") == 0) { return 1; }
+    if (strcmp(args[0], "hash") == 0) { return 0; }
 
     if (is_function(args[0])) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            signal(SIGINT, SIG_DFL);
-            char *home = getenv("HOME");
-            char rc_file[512] = "";
-            if (home) snprintf(rc_file, sizeof(rc_file), "%s/.nshrc", home);
-            char source_cmd[1024];
-            snprintf(source_cmd, sizeof(source_cmd), "source %s 2>/dev/null; \"$@\"", rc_file);
-            char *exec_args[MAX_ARGS + 5];
-            exec_args[0] = "bash";
-            exec_args[1] = "-c";
-            exec_args[2] = source_cmd;
-            exec_args[3] = "bash";
-            for (int i = 0; i < argc; i++) exec_args[4 + i] = args[i];
-            exec_args[4 + argc] = NULL;
-            execvp("bash", exec_args);
-            fprintf(stderr, "nsh: execvp bash: %s\n", strerror(errno));
-            exit(EXIT_FAILURE);
-        } else if (pid > 0) {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status)) last_exit_status = WEXITSTATUS(status);
-            else if (WIFSIGNALED(status)) last_exit_status = 128 + WTERMSIG(status);
+        const char *body = get_function_body(args[0]);
+        if (body && *body) {
+            char func_body[8192];
+            strncpy(func_body, body, sizeof(func_body) - 1);
+            func_body[sizeof(func_body) - 1] = '\0';
+
+            char *old_val[argc];
+            for (int i = 1; i < argc; i++) {
+                char varname[32];
+                snprintf(varname, sizeof(varname), "%d", i);
+                old_val[i] = getenv(varname);
+                setenv(varname, args[i], 1);
+            }
+            setenv("@", "", 1);
+
+            int old_loop_break = loop_break_flag;
+            int old_loop_continue = loop_continue_flag;
+            parse_and_execute(func_body);
+            int ret = last_exit_status;
+            loop_break_flag = old_loop_break;
+            loop_continue_flag = old_loop_continue;
+
+            for (int i = 1; i < argc; i++) {
+                char varname[32];
+                snprintf(varname, sizeof(varname), "%d", i);
+                if (old_val[i]) setenv(varname, old_val[i], 1);
+                else unsetenv(varname);
+            }
+            return ret;
         }
         return 0;
     }
@@ -995,6 +1079,7 @@ static int exec_simple(char **args, int argc) {
 static void execute_segment(char *cmd) {
     while (*cmd == ' ' || *cmd == '\t') cmd++;
     if (!*cmd) return;
+
 
     if (strncmp(cmd, "if ", 3) == 0 || strncmp(cmd, "if\t", 3) == 0 || strncmp(cmd, "if\n", 3) == 0 || strcmp(cmd, "if") == 0) {
         handle_if(cmd[2] ? cmd + 3 : cmd + 2);
@@ -1054,7 +1139,8 @@ static void execute_segment(char *cmd) {
         return;
     }
 
-    int redir_out_fd = -1, redir_in_fd = -1;
+    redir_out_fd = -1;
+    redir_in_fd = -1;
     int redir_out_append = 0;
     char redir_out_file[512] = {0}, redir_in_file[512] = {0};
 
@@ -1143,16 +1229,20 @@ static void execute_segment(char *cmd) {
         char value[1024];
         int v_idx = 0;
 
-        if (*val_start == '\'' || *val_start == '"') {
-            char q = *val_start++;
-            while (*val_start && *val_start != q && v_idx < (int)sizeof(value) - 1) {
-                if (*val_start == '\\' && val_start[1]) { val_start++; value[v_idx++] = *val_start++; continue; }
+        while (*val_start && !isspace((unsigned char)*val_start) && v_idx < (int)sizeof(value) - 1) {
+            if (*val_start == '\'' || *val_start == '"') {
+                char q = *val_start++;
+                while (*val_start && *val_start != q && v_idx < (int)sizeof(value) - 1) {
+                    if (*val_start == '\\' && val_start[1]) { val_start++; value[v_idx++] = *val_start++; continue; }
+                    value[v_idx++] = *val_start++;
+                }
+                if (*val_start == q) val_start++;
+            } else if (*val_start == '\\' && val_start[1]) {
+                val_start++;
+                value[v_idx++] = *val_start++;
+            } else {
                 value[v_idx++] = *val_start++;
             }
-            if (*val_start == q) val_start++;
-        } else {
-            while (*val_start && !isspace((unsigned char)*val_start) && v_idx < (int)sizeof(value) - 1)
-                value[v_idx++] = *val_start++;
         }
         value[v_idx] = '\0';
 
@@ -1174,20 +1264,10 @@ static void execute_segment(char *cmd) {
 
     int has_command = (argc > 0);
 
-    if (!has_command && env_count > 0) {
+    if (argc == 0) {
         for (int i = 0; i < env_count; i++) {
             free(env_save[i][0]);
             if (env_save[i][1]) free(env_save[i][1]);
-        }
-        free_args(args);
-        return;
-    }
-
-    if (argc == 0) {
-        for (int i = 0; i < env_count; i++) {
-            if (env_save[i][1]) { setenv(env_save[i][0], env_save[i][1], 1); free(env_save[i][1]); }
-            else unsetenv(env_save[i][0]);
-            free(env_save[i][0]);
         }
         free_args(args);
         return;
@@ -1303,6 +1383,11 @@ static void parse_and_execute(char *cmdline) {
         while (*p == ' ' || *p == '\t' || *p == '\n') p++;
         if (!*p) break;
 
+        if (*p == '#') {
+            while (*p && *p != '\n') p++;
+            continue;
+        }
+
         char buf[ARG_SIZE];
         int b_idx = 0;
         int in_sq = 0, in_dq = 0;
@@ -1310,6 +1395,82 @@ static void parse_and_execute(char *cmdline) {
         int compound_end = 0;
         char *cp = p;
         while (*cp == ' ' || *cp == '\t') cp++;
+
+        char *line_end = cp;
+        { char *le = cp; while (*le && *le != '\n' && *le != ';') le++; line_end = le; }
+        int line_len = (int)(line_end - cp);
+
+        if (strncmp(cp, "function ", 9) == 0 ||
+            (memchr(cp, '(', line_len) && memchr(cp, ')', line_len) && memmem(cp, line_len, "{", 1))) {
+            char *brace = memchr(cp, '{', line_len);
+            if (brace) {
+                int depth = 1;
+                char *q = brace + 1;
+                int in_sq2 = 0, in_dq2 = 0;
+                while (*q && depth > 0) {
+                    if (*q == '\\' && !in_sq2) { q++; if (*q) q++; continue; }
+                    if (*q == '\'' && !in_dq2) { in_sq2 = !in_sq2; q++; continue; }
+                    if (*q == '"' && !in_sq2) { in_dq2 = !in_dq2; q++; continue; }
+                    if (!in_sq2 && !in_dq2) {
+                        if (*q == '{') depth++;
+                        if (*q == '}') depth--;
+                    }
+                    if (depth > 0) q++;
+                }
+                if (depth == 0) {
+                    char fname[64] = "";
+                    char *fn_start = cp;
+                    if (strncmp(cp, "function ", 9) == 0) fn_start = cp + 9;
+                    char *open_paren = strchr(fn_start, '(');
+                    if (open_paren) {
+                        char *end_name = open_paren - 1;
+                        while (end_name > fn_start && (*end_name == ' ' || *end_name == '\t')) end_name--;
+                        int nlen = (int)(end_name - fn_start + 1);
+                        if (nlen > 0 && nlen < (int)sizeof(fname)) {
+                            strncpy(fname, fn_start, nlen);
+                            fname[nlen] = '\0';
+                        }
+                    } else {
+                        char *sp = strpbrk(fn_start, " \t{");
+                        if (sp) {
+                            int nlen = (int)(sp - fn_start);
+                            if (nlen > 0 && nlen < (int)sizeof(fname)) {
+                                strncpy(fname, fn_start, nlen);
+                                fname[nlen] = '\0';
+                            }
+                        }
+                    }
+                    if (fname[0]) {
+                        char fbody[4096] = "";
+                        int flen = (int)(q - brace - 1);
+                        if (flen > 0 && flen < (int)sizeof(fbody)) {
+                            strncpy(fbody, brace + 1, flen);
+                            fbody[flen] = '\0';
+                        }
+                        int found = 0;
+                        for (int fi2 = 0; fi2 < function_count; fi2++) {
+                            if (strcmp(functions[fi2].name, fname) == 0) {
+                                strncpy(functions[fi2].body, fbody, sizeof(functions[fi2].body) - 1);
+                                functions[fi2].body[sizeof(functions[fi2].body) - 1] = '\0';
+                                found = 1;
+                                break;
+                            }
+                        }
+                        if (!found && function_count < MAX_FUNCTIONS) {
+                            strncpy(functions[function_count].name, fname, sizeof(functions[function_count].name) - 1);
+                            functions[function_count].name[sizeof(functions[function_count].name) - 1] = '\0';
+                            strncpy(functions[function_count].body, fbody, sizeof(functions[function_count].body) - 1);
+                            functions[function_count].body[sizeof(functions[function_count].body) - 1] = '\0';
+                            function_count++;
+                        }
+                    }
+                    char *end = q + 1;
+                    while (*end && *end != ';' && *end != '\n') end++;
+                    p = end;
+                    continue;
+                }
+            }
+        }
 
         if (strncmp(cp, "if ", 3) == 0 || strncmp(cp, "if\t", 3) == 0 || strncmp(cp, "if\n", 3) == 0 || strcmp(cp, "if") == 0 ||
             strncmp(cp, "for ", 4) == 0 || strncmp(cp, "for\t", 4) == 0 || strncmp(cp, "for\n", 4) == 0 || strcmp(cp, "for") == 0 ||
@@ -1337,6 +1498,10 @@ static void parse_and_execute(char *cmdline) {
             if (*p == '\\' && !in_sq) { buf[b_idx++] = *p++; if (*p) buf[b_idx++] = *p++; continue; }
             if (*p == '\'' && !in_dq) { in_sq = !in_sq; buf[b_idx++] = *p++; continue; }
             if (*p == '"' && !in_sq) { in_dq = !in_dq; buf[b_idx++] = *p++; continue; }
+            if (!in_sq && !in_dq && *p == '#') {
+                while (*p && *p != '\n') p++;
+                break;
+            }
             if (!in_sq && !in_dq && (*p == ';' || *p == '\n')) break;
             buf[b_idx++] = *p++;
         }
@@ -1368,7 +1533,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc == 2 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0)) {
-        printf("Nsh version 1.8\n");
+        printf("Nsh version 2.0\n");
         return 0;
     }
 

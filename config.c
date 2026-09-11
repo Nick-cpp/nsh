@@ -214,6 +214,15 @@ int is_function(const char *name) {
     return 0;
 }
 
+const char* get_function_body(const char *name) {
+    for (int i = 0; i < function_count; i++) {
+        if (strcmp(functions[i].name, name) == 0) {
+            return functions[i].body;
+        }
+    }
+    return NULL;
+}
+
 void expand_alias(char *buffer, size_t max_len) {
     // Увеличено с 512 до 1024, чтобы вместить MAX_LINE
     char temp[1024]; 
